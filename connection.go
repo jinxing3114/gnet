@@ -20,6 +20,7 @@ package gnet
 
 import (
 	"io"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -45,14 +46,14 @@ type conn struct {
 	pollAttachment *netpoll.PollAttachment // connection attachment for poller
 	inboundBuffer  elastic.RingBuffer      // buffer for leftover data from the peer
 	buffer         []byte                  // buffer for the latest bytes
-	fd             int                     // file descriptor
+	gfd            GFD                     // file descriptor
 	isDatagram     bool                    // UDP protocol
 	opened         bool                    // connection opened event fired
 }
 
 func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr net.Addr) (c *conn) {
 	c = &conn{
-		fd:         fd,
+		gfd:        newGFD(fd, el.idx, 0),
 		peer:       sa,
 		loop:       el,
 		localAddr:  localAddr,
@@ -85,7 +86,7 @@ func (c *conn) releaseTCP() {
 
 func newUDPConn(fd int, el *eventloop, localAddr net.Addr, sa unix.Sockaddr, connected bool) (c *conn) {
 	c = &conn{
-		fd:         fd,
+		gfd:        newGFD(fd, el.idx, 0),
 		peer:       sa,
 		loop:       el,
 		localAddr:  localAddr,
@@ -114,7 +115,7 @@ func (c *conn) releaseUDP() {
 }
 
 func (c *conn) open(buf []byte) error {
-	n, err := unix.Write(c.fd, buf)
+	n, err := unix.Write(c.gfd.FD(), buf)
 	if err != nil && err == unix.EAGAIN {
 		_, _ = c.outboundBuffer.Write(buf)
 		return nil
@@ -137,7 +138,7 @@ func (c *conn) write(data []byte) (n int, err error) {
 	}
 
 	var sent int
-	if sent, err = unix.Write(c.fd, data); err != nil {
+	if sent, err = unix.Write(c.gfd.FD(), data); err != nil {
 		// A temporary error occurs, append the data to outbound buffer, writing it back to the peer in the next round.
 		if err == unix.EAGAIN {
 			_, _ = c.outboundBuffer.Write(data)
@@ -167,7 +168,7 @@ func (c *conn) writev(bs [][]byte) (n int, err error) {
 	}
 
 	var sent int
-	if sent, err = gio.Writev(c.fd, bs); err != nil {
+	if sent, err = gio.Writev(c.gfd.FD(), bs); err != nil {
 		// A temporary error occurs, append the data to outbound buffer, writing it back to the peer in the next round.
 		if err == unix.EAGAIN {
 			_, _ = c.outboundBuffer.Writev(bs)
@@ -231,10 +232,11 @@ func (c *conn) asyncWritev(itf interface{}) (err error) {
 }
 
 func (c *conn) sendTo(buf []byte) error {
+	log.Println(c.peer, c.peer == nil)
 	if c.peer == nil {
-		return unix.Send(c.fd, buf, 0)
+		return unix.Send(c.gfd.FD(), buf, 0)
 	}
-	return unix.Sendto(c.fd, buf, 0, c.peer)
+	return unix.Sendto(c.gfd.FD(), buf, 0, c.peer)
 }
 
 func (c *conn) resetBuffer() {
@@ -410,14 +412,16 @@ func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
 
 // Implementation of Socket interface
 
-func (c *conn) Fd() int                        { return c.fd }
-func (c *conn) Dup() (fd int, err error)       { fd, _, err = netpoll.Dup(c.fd); return }
-func (c *conn) SetReadBuffer(bytes int) error  { return socket.SetRecvBuffer(c.fd, bytes) }
-func (c *conn) SetWriteBuffer(bytes int) error { return socket.SetSendBuffer(c.fd, bytes) }
-func (c *conn) SetLinger(sec int) error        { return socket.SetLinger(c.fd, sec) }
-func (c *conn) SetNoDelay(noDelay bool) error  { return socket.SetNoDelay(c.fd, bool2int(noDelay)) }
+func (c *conn) Gfd() GFD                       { return c.gfd }
+func (c *conn) Dup() (fd int, err error)       { fd, _, err = netpoll.Dup(c.gfd.FD()); return }
+func (c *conn) SetReadBuffer(bytes int) error  { return socket.SetRecvBuffer(c.gfd.FD(), bytes) }
+func (c *conn) SetWriteBuffer(bytes int) error { return socket.SetSendBuffer(c.gfd.FD(), bytes) }
+func (c *conn) SetLinger(sec int) error        { return socket.SetLinger(c.gfd.FD(), sec) }
+func (c *conn) SetNoDelay(noDelay bool) error {
+	return socket.SetNoDelay(c.gfd.FD(), bool2int(noDelay))
+}
 func (c *conn) SetKeepAlivePeriod(d time.Duration) error {
-	return socket.SetKeepAlivePeriod(c.fd, int(d.Seconds()))
+	return socket.SetKeepAlivePeriod(c.gfd.FD(), int(d.Seconds()))
 }
 
 // ==================================== Concurrency-safe API's ====================================

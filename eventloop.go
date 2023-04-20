@@ -37,16 +37,17 @@ import (
 )
 
 type eventloop struct {
-	ln           *listener       // listener
-	idx          int             // loop index in the engine loops list
-	cache        bytes.Buffer    // temporary buffer for scattered bytes
-	engine       *engine         // engine in loop
-	poller       *netpoll.Poller // epoll or kqueue
-	buffer       []byte          // read packet buffer whose capacity is set by user, default value is 64KB
-	connCount    int32           // number of active connections in event-loop
-	udpSockets   map[int]*conn   // client-side UDP socket map: fd -> conn
-	connections  map[int]*conn   // TCP connection map: fd -> conn
-	eventHandler EventHandler    // user eventHandler
+	ln            *listener       // listener
+	idx           int             // loop index in the engine loops list
+	cache         bytes.Buffer    // temporary buffer for scattered bytes
+	engine        *engine         // engine in loop
+	poller        *netpoll.Poller // epoll or kqueue
+	buffer        []byte          // read packet buffer whose capacity is set by user, default value is 64KB
+	connCount     int32           // number of active connections in event-loop
+	connectionNAI int             //connections Next Available Index
+	connectionMap map[int]GFD     //TCP connection map: fd -> GFD
+	connections   []*conn         //TCP connection slice *conn
+	eventHandler  EventHandler    // user eventHandler
 }
 
 func (el *eventloop) getLogger() logging.Logger {
@@ -66,32 +67,64 @@ func (el *eventloop) closeAllSockets() {
 	for _, c := range el.connections {
 		_ = el.closeConn(c, nil)
 	}
-	for _, c := range el.udpSockets {
-		_ = el.closeConn(c, nil)
-	}
 }
 
 func (el *eventloop) register(itf interface{}) error {
 	c := itf.(*conn)
 	if c.pollAttachment == nil { // UDP socket
 		c.pollAttachment = netpoll.GetPollAttachment()
-		c.pollAttachment.FD = c.fd
+		c.pollAttachment.FD = c.gfd.FD()
 		c.pollAttachment.Callback = el.readUDP
 		if err := el.poller.AddRead(c.pollAttachment); err != nil {
-			_ = unix.Close(c.fd)
+			_ = unix.Close(c.gfd.FD())
 			c.releaseUDP()
 			return err
 		}
-		el.udpSockets[c.fd] = c
+		el.connsAdd(c)
 		return nil
 	}
 	if err := el.poller.AddRead(c.pollAttachment); err != nil {
-		_ = unix.Close(c.fd)
+		_ = unix.Close(c.gfd.FD())
 		c.releaseTCP()
 		return err
 	}
-	el.connections[c.fd] = c
+
+	el.connsAdd(c)
 	return el.open(c)
+}
+
+func (el *eventloop) connsAdd(c *conn) {
+	if el.connectionNAI == -1 || el.connectionNAI >= len(el.connections) { //第一位或者已超过可用位置
+		if cap(el.connections) == len(el.connections) { //需要扩容，可改为已用容量百分比判断
+			el.connections = append(el.connections, make([]*conn, 10000)...)
+			//有剩余容量，可直接追加
+			c.gfd.updateElIndex(el.connectionNAI)
+			el.connections[el.connectionNAI] = c
+			el.connectionNAI++
+		} else {
+			//有剩余容量，可直接追加
+			c.gfd.updateElIndex(len(el.connections))
+			el.connections = append(el.connections, c)
+			el.connectionNAI = len(el.connections)
+		}
+	} else {
+		el.connections[el.connectionNAI] = c
+		c.gfd.updateElIndex(el.connectionNAI)
+		for i := el.connectionNAI; i < len(el.connections); i++ {
+			if el.connections[i] == nil {
+				el.connectionNAI = i
+				return
+			}
+		}
+		el.connectionNAI = len(el.connections)
+	}
+	el.connectionMap[c.gfd.FD()] = c.gfd
+}
+
+func (el *eventloop) releaseConns() {
+	if cap(el.connections)-len(el.connections) > 20000 { //空余容量大于阈值2倍，则降低容量
+		el.connections = el.connections[: len(el.connections) : cap(el.connections)-10000]
+	}
 }
 
 func (el *eventloop) open(c *conn) error {
@@ -115,7 +148,7 @@ func (el *eventloop) open(c *conn) error {
 }
 
 func (el *eventloop) read(c *conn) error {
-	n, err := unix.Read(c.fd, el.buffer)
+	n, err := unix.Read(c.gfd.FD(), el.buffer)
 	if err != nil || n == 0 {
 		if err == unix.EAGAIN {
 			return nil
@@ -152,9 +185,9 @@ func (el *eventloop) write(c *conn) error {
 		if len(iov) > iovMax {
 			iov = iov[:iovMax]
 		}
-		n, err = io.Writev(c.fd, iov)
+		n, err = io.Writev(c.gfd.FD(), iov)
 	} else {
-		n, err = unix.Write(c.fd, iov[0])
+		n, err = unix.Write(c.gfd.FD(), iov[0])
 	}
 	_, _ = c.outboundBuffer.Discard(n)
 	switch err {
@@ -176,10 +209,10 @@ func (el *eventloop) write(c *conn) error {
 
 func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 	if addr := c.localAddr; addr != nil && strings.HasPrefix(c.localAddr.Network(), "udp") {
-		rerr = el.poller.Delete(c.fd)
-		if c.fd != el.ln.fd {
-			rerr = unix.Close(c.fd)
-			delete(el.udpSockets, c.fd)
+		rerr = el.poller.Delete(c.gfd.FD())
+		if c.gfd.FD() != el.ln.fd {
+			rerr = unix.Close(c.gfd.FD())
+			delete(el.connectionMap, c.gfd.FD())
 		}
 		if el.eventHandler.OnClose(c, err) == Shutdown {
 			return gerrors.ErrEngineShutdown
@@ -199,7 +232,7 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 			if len(iov) > iovMax {
 				iov = iov[:iovMax]
 			}
-			if n, e := io.Writev(c.fd, iov); e != nil {
+			if n, e := io.Writev(c.gfd.FD(), iov); e != nil {
 				el.getLogger().Warnf("closeConn: error occurs when sending data back to peer, %v", e)
 				break
 			} else {
@@ -208,12 +241,12 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 		}
 	}
 
-	err0, err1 := el.poller.Delete(c.fd), unix.Close(c.fd)
+	err0, err1 := el.poller.Delete(c.gfd.FD()), unix.Close(c.gfd.FD())
 	if err0 != nil {
-		rerr = fmt.Errorf("failed to delete fd=%d from poller in event-loop(%d): %v", c.fd, el.idx, err0)
+		rerr = fmt.Errorf("failed to delete fd=%d from poller in event-loop(%d): %v", c.gfd.FD(), el.idx, err0)
 	}
 	if err1 != nil {
-		err1 = fmt.Errorf("failed to close fd=%d in event-loop(%d): %v", c.fd, el.idx, os.NewSyscallError("close", err1))
+		err1 = fmt.Errorf("failed to close fd=%d in event-loop(%d): %v", c.gfd.FD(), el.idx, os.NewSyscallError("close", err1))
 		if rerr != nil {
 			rerr = errors.New(rerr.Error() + " & " + err1.Error())
 		} else {
@@ -221,7 +254,13 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 		}
 	}
 
-	delete(el.connections, c.fd)
+	delete(el.connectionMap, c.gfd.FD())
+	el.connections[c.gfd.connIndex()] = nil
+	if el.connectionNAI > c.gfd.connIndex() {
+		el.connectionNAI = c.gfd.connIndex()
+	}
+	el.releaseConns()
+
 	el.addConn(-1)
 	if el.eventHandler.OnClose(c, err) == Shutdown {
 		rerr = gerrors.ErrEngineShutdown
@@ -232,7 +271,7 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 }
 
 func (el *eventloop) wake(c *conn) error {
-	if co, ok := el.connections[c.fd]; !ok || co != c {
+	if _, ok := el.connectionMap[c.gfd.FD()]; !ok || el.connections[c.gfd.connIndex()] != c {
 		return nil // ignore stale wakes.
 	}
 
@@ -303,7 +342,7 @@ func (el *eventloop) readUDP(fd int, _ netpoll.IOEvent) error {
 	if fd == el.ln.fd {
 		c = newUDPConn(fd, el, el.ln.addr, sa, false)
 	} else {
-		c = el.udpSockets[fd]
+		c = el.connections[fd]
 	}
 	c.buffer = el.buffer[:n]
 	action := el.eventHandler.OnTraffic(c)

@@ -178,8 +178,8 @@ type AsyncCallback func(c Conn, err error) error
 
 // Socket is a set of functions which manipulate the underlying file descriptor of a connection.
 type Socket interface {
-	// Fd returns the underlying file descriptor.
-	Fd() int
+	// Gfd returns the underlying file descriptor.
+	Gfd() GFD
 
 	// Dup returns a copy of the underlying file descriptor.
 	// It is the caller's responsibility to close fd when finished.
