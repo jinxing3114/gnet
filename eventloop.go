@@ -23,6 +23,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/panjf2000/gnet/v2/internal/queue"
+	"log"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -34,6 +36,15 @@ import (
 	"github.com/panjf2000/gnet/v2/internal/netpoll"
 	gerrors "github.com/panjf2000/gnet/v2/pkg/errors"
 	"github.com/panjf2000/gnet/v2/pkg/logging"
+)
+
+const (
+	triggerTypeAsyncWrite = iota
+	triggerTypeAsyncWritev
+	triggerTypeWake
+	triggerTypeClose
+	triggerTypeShutdown
+	triggerRegister
 )
 
 type eventloop struct {
@@ -64,8 +75,12 @@ func (el *eventloop) loadConn() int32 {
 
 func (el *eventloop) closeAllSockets() {
 	// Close loops and all outstanding connections
-	for _, c := range el.connections {
-		_ = el.closeConn(c, nil)
+	log.Println(len(el.connections), cap(el.connections))
+	for i, c := range el.connections {
+		log.Println(i, c == nil)
+		if c != nil {
+			_ = el.closeConn(c, nil)
+		}
 	}
 }
 
@@ -94,22 +109,23 @@ func (el *eventloop) register(itf interface{}) error {
 }
 
 func (el *eventloop) connsAdd(c *conn) {
+	log.Println("conns add before:", c.gfd.FD(), el.connectionNAI, len(el.connections), cap(el.connections))
 	if el.connectionNAI == -1 || el.connectionNAI >= len(el.connections) { //第一位或者已超过可用位置
 		if cap(el.connections) == len(el.connections) { //需要扩容，可改为已用容量百分比判断
 			el.connections = append(el.connections, make([]*conn, 10000)...)
 			//有剩余容量，可直接追加
-			c.gfd.updateElIndex(el.connectionNAI)
+			c.gfd.updateConnIndex(el.connectionNAI)
 			el.connections[el.connectionNAI] = c
 			el.connectionNAI++
 		} else {
 			//有剩余容量，可直接追加
-			c.gfd.updateElIndex(len(el.connections))
+			c.gfd.updateConnIndex(len(el.connections))
 			el.connections = append(el.connections, c)
 			el.connectionNAI = len(el.connections)
 		}
 	} else {
 		el.connections[el.connectionNAI] = c
-		c.gfd.updateElIndex(el.connectionNAI)
+		c.gfd.updateConnIndex(el.connectionNAI)
 		for i := el.connectionNAI; i < len(el.connections); i++ {
 			if el.connections[i] == nil {
 				el.connectionNAI = i
@@ -118,6 +134,7 @@ func (el *eventloop) connsAdd(c *conn) {
 		}
 		el.connectionNAI = len(el.connections)
 	}
+	log.Println("conns add after:", c.gfd.FD(), el.connectionNAI, len(el.connections), cap(el.connections))
 	el.connectionMap[c.gfd.FD()] = c.gfd
 }
 
@@ -208,6 +225,7 @@ func (el *eventloop) write(c *conn) error {
 }
 
 func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
+	log.Println("close fd:", c.Gfd().FD())
 	if addr := c.localAddr; addr != nil && strings.HasPrefix(c.localAddr.Network(), "udp") {
 		rerr = el.poller.Delete(c.gfd.FD())
 		if c.gfd.FD() != el.ln.fd {
@@ -299,7 +317,7 @@ func (el *eventloop) ticker(ctx context.Context) {
 		switch action {
 		case None:
 		case Shutdown:
-			err := el.poller.UrgentTrigger(func(_ interface{}) error { return gerrors.ErrEngineShutdown }, nil)
+			err := el.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil)
 			el.getLogger().Debugf("stopping ticker in event-loop(%d) from OnTick(), UrgentTrigger:%v", el.idx, err)
 		}
 		if timer == nil {
@@ -313,6 +331,53 @@ func (el *eventloop) ticker(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+	}
+}
+
+func (el *eventloop) taskFuncRun(task *queue.Task) (err error) {
+	//非conn执行任务
+	if task.Fd == 0 || task.ConnIndex == 0 {
+		switch task.TaskType {
+		case triggerTypeShutdown:
+			return gerrors.ErrEngineShutdown
+		case triggerRegister:
+			return el.register(task.Arg)
+		default:
+			return
+		}
+	}
+
+	//需conn执行任务
+	if len(el.connections) <= task.ConnIndex {
+		return
+	}
+	c := el.connections[task.ConnIndex]
+	if c == nil || c.gfd.FD() != task.Fd {
+		return
+	}
+	switch task.TaskType {
+	case triggerTypeAsyncWrite:
+		return c.asyncWrite(task.Arg)
+	case triggerTypeAsyncWritev:
+		return c.asyncWritev(task.Arg)
+	case triggerTypeClose:
+		err = el.closeConn(c, nil)
+		if task.Arg != nil {
+			if callback, ok := task.Arg.(AsyncCallback); ok && callback != nil {
+				_ = callback(c, err)
+			}
+		}
+		return
+	case triggerTypeWake:
+		err = el.wake(c)
+		if task.Arg != nil {
+			if callback, ok := task.Arg.(AsyncCallback); ok && callback != nil {
+				_ = callback(c, err)
+			}
+		}
+		return
+	default:
+		return
 	}
 }
 
@@ -331,6 +396,7 @@ func (el *eventloop) handleAction(c *conn, action Action) error {
 
 func (el *eventloop) readUDP(fd int, _ netpoll.IOEvent) error {
 	n, sa, err := unix.Recvfrom(fd, el.buffer, 0)
+	//log.Println(reflect.TypeOf(sa), sa.(*unix.SockaddrInet4))
 	if err != nil {
 		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
 			return nil

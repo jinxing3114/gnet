@@ -20,7 +20,6 @@ package gnet
 
 import (
 	"io"
-	"log"
 	"net"
 	"os"
 	"time"
@@ -52,6 +51,7 @@ type conn struct {
 }
 
 func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr net.Addr) (c *conn) {
+	//log.Println(fd, el, sa, localAddr)
 	c = &conn{
 		gfd:        newGFD(fd, el.idx, 0),
 		peer:       sa,
@@ -232,7 +232,6 @@ func (c *conn) asyncWritev(itf interface{}) (err error) {
 }
 
 func (c *conn) sendTo(buf []byte) error {
-	log.Println(c.peer, c.peer == nil)
 	if c.peer == nil {
 		return unix.Send(c.gfd.FD(), buf, 0)
 	}
@@ -412,6 +411,7 @@ func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
 
 // Implementation of Socket interface
 
+func (c *conn) Fd() int                        { return c.gfd.FD() }
 func (c *conn) Gfd() GFD                       { return c.gfd }
 func (c *conn) Dup() (fd int, err error)       { fd, _, err = netpoll.Dup(c.gfd.FD()); return }
 func (c *conn) SetReadBuffer(bytes int) error  { return socket.SetRecvBuffer(c.gfd.FD(), bytes) }
@@ -435,39 +435,24 @@ func (c *conn) AsyncWrite(buf []byte, callback AsyncCallback) error {
 		}()
 		return c.sendTo(buf)
 	}
-	return c.loop.poller.Trigger(c.asyncWrite, &asyncWriteHook{callback, buf})
+	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeAsyncWrite, &asyncWriteHook{callback, buf})
 }
 
 func (c *conn) AsyncWritev(bs [][]byte, callback AsyncCallback) error {
 	if c.isDatagram {
 		return gerrors.ErrUnsupportedOp
 	}
-	return c.loop.poller.Trigger(c.asyncWritev, &asyncWritevHook{callback, bs})
+	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeAsyncWritev, &asyncWritevHook{callback, bs})
 }
 
 func (c *conn) Wake(callback AsyncCallback) error {
-	return c.loop.poller.UrgentTrigger(func(_ interface{}) (err error) {
-		err = c.loop.wake(c)
-		if callback != nil {
-			_ = callback(c, err)
-		}
-		return
-	}, nil)
+	return c.loop.poller.UrgentTrigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeWake, callback)
 }
 
 func (c *conn) CloseWithCallback(callback AsyncCallback) error {
-	return c.loop.poller.Trigger(func(_ interface{}) (err error) {
-		err = c.loop.closeConn(c, nil)
-		if callback != nil {
-			_ = callback(c, err)
-		}
-		return
-	}, nil)
+	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeClose, callback)
 }
 
 func (c *conn) Close() error {
-	return c.loop.poller.Trigger(func(_ interface{}) (err error) {
-		err = c.loop.closeConn(c, nil)
-		return
-	}, nil)
+	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeClose, nil)
 }

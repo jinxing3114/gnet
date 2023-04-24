@@ -51,7 +51,7 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 		el.engine.signalShutdown()
 	}()
 
-	err := el.poller.Polling()
+	err := el.poller.Polling(el.taskFuncRun)
 	if err == errors.ErrEngineShutdown {
 		el.engine.opts.Logger.Debugf("event-loop(%d) is exiting in terms of the demand from user, %v", el.idx, err)
 	} else if err != nil {

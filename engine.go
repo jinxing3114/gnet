@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 
 	"github.com/panjf2000/gnet/v2/internal/netpoll"
-	"github.com/panjf2000/gnet/v2/pkg/errors"
 )
 
 type engine struct {
@@ -203,7 +202,7 @@ func (eng *engine) stop(s Engine) {
 
 	// Notify all loops to close by closing all listeners
 	eng.lb.iterate(func(i int, el *eventloop) bool {
-		err := el.poller.UrgentTrigger(func(_ interface{}) error { return errors.ErrEngineShutdown }, nil)
+		err := el.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil)
 		if err != nil {
 			eng.opts.Logger.Errorf("failed to call UrgentTrigger on sub event-loop when stopping engine: %v", err)
 		}
@@ -212,7 +211,7 @@ func (eng *engine) stop(s Engine) {
 
 	if eng.mainLoop != nil {
 		eng.ln.close()
-		err := eng.mainLoop.poller.UrgentTrigger(func(_ interface{}) error { return errors.ErrEngineShutdown }, nil)
+		err := eng.mainLoop.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil)
 		if err != nil {
 			eng.opts.Logger.Errorf("failed to call UrgentTrigger on main event-loop when stopping engine: %v", err)
 		}

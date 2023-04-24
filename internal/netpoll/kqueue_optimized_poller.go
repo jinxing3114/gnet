@@ -78,9 +78,9 @@ var note = []unix.Kevent_t{{
 //
 // Note that urgentAsyncTaskQueue is a queue with high-priority and its size is expected to be small,
 // so only those urgent tasks should be put into this queue.
-func (p *Poller) UrgentTrigger(fn queue.TaskFunc, arg interface{}) (err error) {
+func (p *Poller) UrgentTrigger(fd, connIndex, taskType int, arg interface{}) (err error) {
 	task := queue.GetTask()
-	task.Run, task.Arg = fn, arg
+	task.Fd, task.ElIndex, task.TaskType, task.Arg = fd, connIndex, taskType, arg
 	p.urgentAsyncTaskQueue.Enqueue(task)
 	if atomic.CompareAndSwapInt32(&p.wakeupCall, 0, 1) {
 		if _, err = unix.Kevent(p.fd, note, nil, nil); err == unix.EAGAIN {
@@ -94,9 +94,9 @@ func (p *Poller) UrgentTrigger(fn queue.TaskFunc, arg interface{}) (err error) {
 // call this method when the task is not so urgent, for instance writing data back to the peer.
 //
 // Note that asyncTaskQueue is a queue with low-priority whose size may grow large and tasks in it may backlog.
-func (p *Poller) Trigger(fn queue.TaskFunc, arg interface{}) (err error) {
+func (p *Poller) Trigger(fd, connIndex, taskType int, arg interface{}) (err error) {
 	task := queue.GetTask()
-	task.Run, task.Arg = fn, arg
+	task.Fd, task.ElIndex, task.TaskType, task.Arg = fd, connIndex, taskType, arg
 	p.asyncTaskQueue.Enqueue(task)
 	if atomic.CompareAndSwapInt32(&p.wakeupCall, 0, 1) {
 		if _, err = unix.Kevent(p.fd, note, nil, nil); err == unix.EAGAIN {
@@ -107,7 +107,7 @@ func (p *Poller) Trigger(fn queue.TaskFunc, arg interface{}) (err error) {
 }
 
 // Polling blocks the current goroutine, waiting for network-events.
-func (p *Poller) Polling() error {
+func (p *Poller) Polling(taskFind func(fd, elIndex, taskType int) queue.TaskFunc) error {
 	el := newEventList(InitPollEventsCap)
 
 	var (
@@ -152,7 +152,7 @@ func (p *Poller) Polling() error {
 			doChores = false
 			task := p.urgentAsyncTaskQueue.Dequeue()
 			for ; task != nil; task = p.urgentAsyncTaskQueue.Dequeue() {
-				switch err = task.Run(task.Arg); err {
+				switch err = taskFind(task.Fd, task.ElIndex, task.TaskType)(task.Arg); err {
 				case nil:
 				case errors.ErrEngineShutdown:
 					return err
@@ -165,7 +165,7 @@ func (p *Poller) Polling() error {
 				if task = p.asyncTaskQueue.Dequeue(); task == nil {
 					break
 				}
-				switch err = task.Run(task.Arg); err {
+				switch err = taskFind(task.Fd, task.ElIndex, task.TaskType)(task.Arg); err {
 				case nil:
 				case errors.ErrEngineShutdown:
 					return err

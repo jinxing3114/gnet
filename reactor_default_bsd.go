@@ -19,6 +19,7 @@
 package gnet
 
 import (
+	"log"
 	"runtime"
 
 	"golang.org/x/sys/unix"
@@ -35,7 +36,7 @@ func (el *eventloop) activateMainReactor(lockOSThread bool) {
 
 	defer el.engine.signalShutdown()
 
-	err := el.poller.Polling(func(fd int, filter int16) error { return el.engine.accept(fd, filter) })
+	err := el.poller.Polling(el.taskFuncRun, func(fd int, filter int16) error { return el.engine.accept(fd, filter) })
 	if err == errors.ErrEngineShutdown {
 		el.engine.opts.Logger.Debugf("main reactor is exiting in terms of the demand from user, %v", err)
 	} else if err != nil {
@@ -54,17 +55,20 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 		el.engine.signalShutdown()
 	}()
 
-	err := el.poller.Polling(func(fd int, filter int16) (err error) {
+	err := el.poller.Polling(el.taskFuncRun, func(fd int, filter int16) (err error) {
+		//log.Println(123, fd, filter)
+		log.Println("fd:", fd, "filter:", filter)
 		if gfd, ack := el.connectionMap[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.FD()], unix.ECONNRESET)
+				err = el.closeConn(el.connections[gfd.connIndex()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.FD()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.FD()])
+				if !el.connections[gfd.connIndex()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connections[gfd.connIndex()])
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.FD()])
+				log.Println("read", el.connections[gfd.connIndex()] == nil, gfd.connIndex())
+				err = el.read(el.connections[gfd.connIndex()])
 			}
 		}
 		return
@@ -88,17 +92,17 @@ func (el *eventloop) run(lockOSThread bool) {
 		el.engine.signalShutdown()
 	}()
 
-	err := el.poller.Polling(func(fd int, filter int16) (err error) {
+	err := el.poller.Polling(el.taskFuncRun, func(fd int, filter int16) (err error) {
 		if gfd, ack := el.connectionMap[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.FD()], unix.ECONNRESET)
+				err = el.closeConn(el.connections[gfd.connIndex()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.FD()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.FD()])
+				if !el.connections[gfd.connIndex()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connections[gfd.connIndex()])
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.FD()])
+				err = el.read(el.connections[gfd.connIndex()])
 			}
 			return
 		}

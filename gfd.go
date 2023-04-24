@@ -1,30 +1,31 @@
 package gnet
 
 const (
-	GfdLbBit      = 56
-	GfdElBit      = 32
-	GfdLbLeftBit  = 8
-	GfdLbRightBit = 40
+	GfdElBit     = 24
+	GfdConnIndex = 0xFFFFFF
 )
 
-type GFD uint64
+type GFD struct {
+	fd    int
+	index uint32
+}
 
 func (gfd GFD) FD() int {
-	return int(gfd)
+	return gfd.fd
 }
 
 func (gfd GFD) elIndex() int {
-	return int(gfd >> GfdLbBit)
+	return int(gfd.index >> 24)
 }
 
 func (gfd GFD) connIndex() int {
-	return int(gfd << GfdLbLeftBit >> GfdLbRightBit)
+	return int(gfd.index & GfdConnIndex)
 }
 
-func (gfd GFD) updateElIndex(elIndex int) {
-	gfd |= GFD(elIndex) << GfdLbRightBit >> GfdLbLeftBit
+func (gfd *GFD) updateConnIndex(connIndex int) {
+	(*gfd).index |= uint32(connIndex) & GfdConnIndex
 }
 
 func newGFD(fd, elIndex, connIndex int) GFD {
-	return GFD(uint64(uint32(fd)) + uint64(elIndex<<GfdLbBit) + uint64(connIndex<<GfdElBit))
+	return GFD{fd: fd, index: uint32(uint8(elIndex))<<GfdElBit + uint32(connIndex)&GfdConnIndex}
 }

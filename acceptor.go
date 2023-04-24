@@ -51,7 +51,7 @@ func (eng *engine) accept(fd int, _ netpoll.IOEvent) error {
 	el := eng.lb.next(remoteAddr)
 	c := newTCPConn(nfd, el, sa, el.ln.addr, remoteAddr)
 
-	err = el.poller.UrgentTrigger(el.register, c)
+	err = el.poller.UrgentTrigger(0, 0, triggerRegister, c)
 	if err != nil {
 		eng.opts.Logger.Errorf("UrgentTrigger() failed due to error: %v", err)
 		_ = unix.Close(nfd)

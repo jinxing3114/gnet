@@ -104,6 +104,24 @@ func (s Engine) Stop(ctx context.Context) error {
 	}
 }
 
+// ==================================== Concurrency-safe API's ====================================
+
+func (s Engine) AsyncWrite(gfd GFD, buf []byte, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeAsyncWrite, &asyncWriteHook{callback, buf})
+}
+
+func (s Engine) AsyncWritev(gfd GFD, bs [][]byte, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeAsyncWritev, &asyncWritevHook{callback, bs})
+}
+
+func (s Engine) Wake(gfd GFD, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeWake, callback)
+}
+
+func (s Engine) Close(gfd GFD, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeClose, callback)
+}
+
 // Reader is an interface that consists of a number of methods for reading that Conn must implement.
 type Reader interface {
 	// ================================== Non-concurrency-safe API's ==================================
@@ -180,6 +198,8 @@ type AsyncCallback func(c Conn, err error) error
 type Socket interface {
 	// Gfd returns the underlying file descriptor.
 	Gfd() GFD
+
+	Fd() int
 
 	// Dup returns a copy of the underlying file descriptor.
 	// It is the caller's responsibility to close fd when finished.
