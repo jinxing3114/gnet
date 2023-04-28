@@ -247,6 +247,9 @@ func run(eventHandler EventHandler, listener *listener, options *Options, protoA
 	if options.NumEventLoop > 0 {
 		numEventLoop = options.NumEventLoop
 	}
+	if numEventLoop > gfd.ElMax {
+		numEventLoop = gfd.ElMax
+	}
 
 	eng := new(engine)
 	eng.opts = options
