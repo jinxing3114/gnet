@@ -107,42 +107,32 @@ func (s Engine) Stop(ctx context.Context) error {
 
 // ==================================== Concurrency-safe API's ====================================
 
-func (s Engine) checkGFDLegal(gfd1 gfd.GFD) bool {
-	if gfd1.FD() <= 0 || gfd1.ElIndex() < 0 || gfd1.ElIndex() >= gfd.ElMax ||
-		gfd1.ConnIndex1() < 0 || gfd1.ConnIndex1() >= gfd.Conn1Max ||
-		gfd1.ConnIndex2() < 0 || gfd1.ConnIndex2() >= gfd.Conn2Max {
-		return false
-	}
-	return true
-}
-
-func (s Engine) AsyncWrite(gfd gfd.GFD, buf []byte, callback AsyncCallback) error {
-	if !s.checkGFDLegal(gfd) {
+func (s Engine) AsyncWrite(gFd gfd.GFD, buf []byte, callback AsyncCallback) error {
+	if !gfd.CheckLegal(gFd) {
 		return nil
 	}
-
-	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWrite, gfd, &asyncWriteHook{callback, buf})
+	return s.eng.lb.index(gFd.ElIndex()).poller.Trigger(triggerTypeAsyncWrite, gFd, &asyncWriteHook{callback, buf})
 }
 
-func (s Engine) AsyncWritev(gfd gfd.GFD, bs [][]byte, callback AsyncCallback) error {
-	if !s.checkGFDLegal(gfd) {
+func (s Engine) AsyncWritev(gFd gfd.GFD, bs [][]byte, callback AsyncCallback) error {
+	if !gfd.CheckLegal(gFd) {
 		return nil
 	}
-	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWritev, gfd, &asyncWritevHook{callback, bs})
+	return s.eng.lb.index(gFd.ElIndex()).poller.Trigger(triggerTypeAsyncWritev, gFd, &asyncWritevHook{callback, bs})
 }
 
-func (s Engine) Wake(gfd gfd.GFD, callback AsyncCallback) error {
-	if !s.checkGFDLegal(gfd) {
+func (s Engine) Wake(gFd gfd.GFD, callback AsyncCallback) error {
+	if !gfd.CheckLegal(gFd) {
 		return nil
 	}
-	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeWake, gfd, callback)
+	return s.eng.lb.index(gFd.ElIndex()).poller.Trigger(triggerTypeWake, gFd, callback)
 }
 
-func (s Engine) Close(gfd gfd.GFD, callback AsyncCallback) error {
-	if !s.checkGFDLegal(gfd) {
+func (s Engine) Close(gFd gfd.GFD, callback AsyncCallback) error {
+	if !gfd.CheckLegal(gFd) {
 		return nil
 	}
-	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeClose, gfd, callback)
+	return s.eng.lb.index(gFd.ElIndex()).poller.Trigger(triggerTypeClose, gFd, callback)
 }
 
 // Reader is an interface that consists of a number of methods for reading that Conn must implement.

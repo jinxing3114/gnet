@@ -15,6 +15,10 @@ const (
 	Conn2Max   = 0xFFFF
 )
 
+// GFD
+// structure introduction
+// |eventloop index|conn first index|conn second index|      fd     |
+// |     1bit      |     1bit       |      2bit       |int type size|
 type GFD [Size]byte
 
 func (gfd GFD) FD() int {
@@ -50,4 +54,13 @@ func NewGFD(fd, elIndex int) (gfd GFD) {
 		binary.BigEndian.PutUint64(gfd[FdStart:], uint64(fd))
 	}
 	return
+}
+
+func CheckLegal(gfd GFD) bool {
+	if gfd.FD() <= 0 || gfd.ElIndex() < 0 || gfd.ElIndex() >= ElMax ||
+		gfd.ConnIndex1() < 0 || gfd.ConnIndex1() >= Conn1Max ||
+		gfd.ConnIndex2() < 0 || gfd.ConnIndex2() >= Conn2Max {
+		return false
+	}
+	return true
 }
