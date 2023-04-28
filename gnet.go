@@ -107,19 +107,41 @@ func (s Engine) Stop(ctx context.Context) error {
 
 // ==================================== Concurrency-safe API's ====================================
 
+func (s Engine) checkGFDLegal(gfd1 gfd.GFD) bool {
+	if gfd1.FD() <= 0 || gfd1.ElIndex() < 0 || gfd1.ElIndex() >= gfd.ElMax ||
+		gfd1.ConnIndex1() < 0 || gfd1.ConnIndex1() >= gfd.Conn1Max ||
+		gfd1.ConnIndex2() < 0 || gfd1.ConnIndex2() >= gfd.Conn2Max {
+		return false
+	}
+	return true
+}
+
 func (s Engine) AsyncWrite(gfd gfd.GFD, buf []byte, callback AsyncCallback) error {
+	if !s.checkGFDLegal(gfd) {
+		return nil
+	}
+
 	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWrite, gfd, &asyncWriteHook{callback, buf})
 }
 
 func (s Engine) AsyncWritev(gfd gfd.GFD, bs [][]byte, callback AsyncCallback) error {
+	if !s.checkGFDLegal(gfd) {
+		return nil
+	}
 	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWritev, gfd, &asyncWritevHook{callback, bs})
 }
 
 func (s Engine) Wake(gfd gfd.GFD, callback AsyncCallback) error {
+	if !s.checkGFDLegal(gfd) {
+		return nil
+	}
 	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeWake, gfd, callback)
 }
 
 func (s Engine) Close(gfd gfd.GFD, callback AsyncCallback) error {
+	if !s.checkGFDLegal(gfd) {
+		return nil
+	}
 	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeClose, gfd, callback)
 }
 

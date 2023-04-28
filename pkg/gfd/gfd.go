@@ -10,6 +10,7 @@ const (
 	FdStart    = 4
 	FdSize     = unsafe.Sizeof(int(0))
 	Size       = FdSize + FdStart
+	ElMax      = 0xFF
 	Conn1Max   = 0xFF
 	Conn2Max   = 0xFFFF
 )
