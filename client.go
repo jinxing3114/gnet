@@ -20,6 +20,7 @@ package gnet
 import (
 	"context"
 	"errors"
+	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"net"
 	"strconv"
 	"sync"
@@ -95,9 +96,9 @@ func NewClient(eventHandler EventHandler, opts ...Option) (cli *Client, err erro
 	}
 
 	el.buffer = make([]byte, options.ReadBufferCap)
-	el.connectionMap = make(map[int]GFD)
-	el.connections = make([]*conn, 0, 10000)
-	el.connectionNAI = -1
+	el.connectionMap = make(map[int]gfd.GFD)
+	el.connections = make([][]*conn, gfd.Conn2Max)
+	el.udpSockets = make(map[int]*conn)
 	el.eventHandler = eventHandler
 	cli.el = el
 	return
@@ -120,7 +121,7 @@ func (cli *Client) Start() error {
 
 // Stop stops the client event-loop.
 func (cli *Client) Stop() (err error) {
-	logging.Error(cli.el.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil))
+	logging.Error(cli.el.poller.UrgentTrigger(triggerTypeShutdown, gfd.GFD{}, nil))
 	cli.el.engine.wg.Wait()
 	logging.Error(cli.el.poller.Close())
 	cli.el.eventHandler.OnShutdown(Engine{})
@@ -214,7 +215,7 @@ func (cli *Client) Enroll(c net.Conn) (Conn, error) {
 	default:
 		return nil, gerrors.ErrUnsupportedProtocol
 	}
-	err = cli.el.poller.UrgentTrigger(0, 0, triggerRegister, gc)
+	err = cli.el.poller.UrgentTrigger(triggerRegister, gc.Gfd(), gc)
 	if err != nil {
 		gc.Close()
 		return nil, err

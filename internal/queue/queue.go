@@ -15,6 +15,7 @@
 package queue
 
 import (
+	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"sync"
 )
 
@@ -23,10 +24,9 @@ type TaskFunc func(interface{}) error
 
 // Task is a wrapper that contains function and its argument.
 type Task struct {
-	Fd        int
-	ConnIndex int
-	TaskType  int
-	Arg       interface{}
+	GFD      gfd.GFD
+	TaskType int
+	Arg      interface{}
 }
 
 var taskPool = sync.Pool{New: func() interface{} { return new(Task) }}
@@ -38,7 +38,10 @@ func GetTask() *Task {
 
 // PutTask puts the trashy Task back in pool.
 func PutTask(task *Task) {
-	task.Fd, task.ConnIndex, task.TaskType, task.Arg = 0, 0, 0, nil
+	for k := range task.GFD {
+		task.GFD[k] = 0
+	}
+	task.TaskType, task.Arg = 0, nil
 	taskPool.Put(task)
 }
 

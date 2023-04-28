@@ -20,6 +20,7 @@ package gnet
 
 import (
 	"context"
+	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -109,9 +110,9 @@ func (eng *engine) activateEventLoops(numEventLoop int) (err error) {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]GFD)
-			el.connections = make([]*conn, 0, 10000)
-			el.connectionNAI = -1
+			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make([][]*conn, gfd.Conn1Max)
+			el.connectionCounts = make([]int32, gfd.Conn1Max)
 			el.eventHandler = eng.eventHandler
 			if err = el.poller.AddRead(el.ln.packPollAttachment(el.accept)); err != nil {
 				return
@@ -143,9 +144,9 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]GFD)
-			el.connections = make([]*conn, 0, 10000)
-			el.connectionNAI = -1
+			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make([][]*conn, gfd.Conn1Max)
+			el.connectionCounts = make([]int32, gfd.Conn1Max)
 			el.eventHandler = eng.eventHandler
 			eng.lb.register(el)
 		} else {
@@ -202,7 +203,7 @@ func (eng *engine) stop(s Engine) {
 
 	// Notify all loops to close by closing all listeners
 	eng.lb.iterate(func(i int, el *eventloop) bool {
-		err := el.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil)
+		err := el.poller.UrgentTrigger(triggerTypeShutdown, gfd.GFD{}, nil)
 		if err != nil {
 			eng.opts.Logger.Errorf("failed to call UrgentTrigger on sub event-loop when stopping engine: %v", err)
 		}
@@ -211,7 +212,7 @@ func (eng *engine) stop(s Engine) {
 
 	if eng.mainLoop != nil {
 		eng.ln.close()
-		err := eng.mainLoop.poller.UrgentTrigger(0, 0, triggerTypeShutdown, nil)
+		err := eng.mainLoop.poller.UrgentTrigger(triggerTypeShutdown, gfd.GFD{}, nil)
 		if err != nil {
 			eng.opts.Logger.Errorf("failed to call UrgentTrigger on main event-loop when stopping engine: %v", err)
 		}

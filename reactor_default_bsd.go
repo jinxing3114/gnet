@@ -19,7 +19,6 @@
 package gnet
 
 import (
-	"log"
 	"runtime"
 
 	"golang.org/x/sys/unix"
@@ -56,19 +55,16 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 	}()
 
 	err := el.poller.Polling(el.taskFuncRun, func(fd int, filter int16) (err error) {
-		//log.Println(123, fd, filter)
-		log.Println("fd:", fd, "filter:", filter)
 		if gfd, ack := el.connectionMap[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.connIndex()], unix.ECONNRESET)
+				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.connIndex()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.connIndex()])
+				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
 				}
 			case netpoll.EVFilterRead:
-				log.Println("read", el.connections[gfd.connIndex()] == nil, gfd.connIndex())
-				err = el.read(el.connections[gfd.connIndex()])
+				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
 			}
 		}
 		return
@@ -96,13 +92,13 @@ func (el *eventloop) run(lockOSThread bool) {
 		if gfd, ack := el.connectionMap[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.connIndex()], unix.ECONNRESET)
+				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.connIndex()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.connIndex()])
+				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.connIndex()])
+				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
 			}
 			return
 		}

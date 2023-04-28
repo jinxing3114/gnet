@@ -17,6 +17,7 @@ package gnet
 
 import (
 	"context"
+	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"io"
 	"net"
 	"strings"
@@ -106,20 +107,20 @@ func (s Engine) Stop(ctx context.Context) error {
 
 // ==================================== Concurrency-safe API's ====================================
 
-func (s Engine) AsyncWrite(gfd GFD, buf []byte, callback AsyncCallback) error {
-	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeAsyncWrite, &asyncWriteHook{callback, buf})
+func (s Engine) AsyncWrite(gfd gfd.GFD, buf []byte, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWrite, gfd, &asyncWriteHook{callback, buf})
 }
 
-func (s Engine) AsyncWritev(gfd GFD, bs [][]byte, callback AsyncCallback) error {
-	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeAsyncWritev, &asyncWritevHook{callback, bs})
+func (s Engine) AsyncWritev(gfd gfd.GFD, bs [][]byte, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeAsyncWritev, gfd, &asyncWritevHook{callback, bs})
 }
 
-func (s Engine) Wake(gfd GFD, callback AsyncCallback) error {
-	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeWake, callback)
+func (s Engine) Wake(gfd gfd.GFD, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeWake, gfd, callback)
 }
 
-func (s Engine) Close(gfd GFD, callback AsyncCallback) error {
-	return s.eng.lb.index(gfd.elIndex()).poller.Trigger(gfd.FD(), gfd.connIndex(), triggerTypeClose, callback)
+func (s Engine) Close(gfd gfd.GFD, callback AsyncCallback) error {
+	return s.eng.lb.index(gfd.ElIndex()).poller.Trigger(triggerTypeClose, gfd, callback)
 }
 
 // Reader is an interface that consists of a number of methods for reading that Conn must implement.
@@ -197,7 +198,7 @@ type AsyncCallback func(c Conn, err error) error
 // Socket is a set of functions which manipulate the underlying file descriptor of a connection.
 type Socket interface {
 	// Gfd returns the underlying file descriptor.
-	Gfd() GFD
+	Gfd() gfd.GFD
 
 	Fd() int
 

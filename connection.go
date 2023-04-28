@@ -19,6 +19,7 @@
 package gnet
 
 import (
+	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"io"
 	"net"
 	"os"
@@ -45,15 +46,14 @@ type conn struct {
 	pollAttachment *netpoll.PollAttachment // connection attachment for poller
 	inboundBuffer  elastic.RingBuffer      // buffer for leftover data from the peer
 	buffer         []byte                  // buffer for the latest bytes
-	gfd            GFD                     // file descriptor
+	gfd            gfd.GFD                 // file descriptor
 	isDatagram     bool                    // UDP protocol
 	opened         bool                    // connection opened event fired
 }
 
 func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr net.Addr) (c *conn) {
-	//log.Println(fd, el, sa, localAddr)
 	c = &conn{
-		gfd:        newGFD(fd, el.idx, 0),
+		gfd:        gfd.NewGFD(fd, el.idx),
 		peer:       sa,
 		loop:       el,
 		localAddr:  localAddr,
@@ -86,7 +86,7 @@ func (c *conn) releaseTCP() {
 
 func newUDPConn(fd int, el *eventloop, localAddr net.Addr, sa unix.Sockaddr, connected bool) (c *conn) {
 	c = &conn{
-		gfd:        newGFD(fd, el.idx, 0),
+		gfd:        gfd.NewGFD(fd, el.idx),
 		peer:       sa,
 		loop:       el,
 		localAddr:  localAddr,
@@ -200,12 +200,11 @@ type asyncWriteHook struct {
 	data     []byte
 }
 
-func (c *conn) asyncWrite(itf interface{}) (err error) {
+func (c *conn) asyncWrite(hook *asyncWriteHook) (err error) {
 	if !c.opened {
 		return nil
 	}
 
-	hook := itf.(*asyncWriteHook)
 	_, err = c.write(hook.data)
 	if hook.callback != nil {
 		_ = hook.callback(c, err)
@@ -218,12 +217,11 @@ type asyncWritevHook struct {
 	data     [][]byte
 }
 
-func (c *conn) asyncWritev(itf interface{}) (err error) {
+func (c *conn) asyncWritev(hook *asyncWritevHook) (err error) {
 	if !c.opened {
 		return nil
 	}
 
-	hook := itf.(*asyncWritevHook)
 	_, err = c.writev(hook.data)
 	if hook.callback != nil {
 		_ = hook.callback(c, err)
@@ -412,7 +410,7 @@ func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
 // Implementation of Socket interface
 
 func (c *conn) Fd() int                        { return c.gfd.FD() }
-func (c *conn) Gfd() GFD                       { return c.gfd }
+func (c *conn) Gfd() gfd.GFD                   { return c.gfd }
 func (c *conn) Dup() (fd int, err error)       { fd, _, err = netpoll.Dup(c.gfd.FD()); return }
 func (c *conn) SetReadBuffer(bytes int) error  { return socket.SetRecvBuffer(c.gfd.FD(), bytes) }
 func (c *conn) SetWriteBuffer(bytes int) error { return socket.SetSendBuffer(c.gfd.FD(), bytes) }
@@ -435,24 +433,24 @@ func (c *conn) AsyncWrite(buf []byte, callback AsyncCallback) error {
 		}()
 		return c.sendTo(buf)
 	}
-	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeAsyncWrite, &asyncWriteHook{callback, buf})
+	return c.loop.poller.Trigger(triggerTypeAsyncWrite, c.gfd, &asyncWriteHook{callback, buf})
 }
 
 func (c *conn) AsyncWritev(bs [][]byte, callback AsyncCallback) error {
 	if c.isDatagram {
 		return gerrors.ErrUnsupportedOp
 	}
-	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeAsyncWritev, &asyncWritevHook{callback, bs})
+	return c.loop.poller.Trigger(triggerTypeAsyncWritev, c.gfd, &asyncWritevHook{callback, bs})
 }
 
 func (c *conn) Wake(callback AsyncCallback) error {
-	return c.loop.poller.UrgentTrigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeWake, callback)
+	return c.loop.poller.UrgentTrigger(triggerTypeWake, c.gfd, callback)
 }
 
 func (c *conn) CloseWithCallback(callback AsyncCallback) error {
-	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeClose, callback)
+	return c.loop.poller.Trigger(triggerTypeClose, c.gfd, callback)
 }
 
 func (c *conn) Close() error {
-	return c.loop.poller.Trigger(c.gfd.FD(), c.gfd.connIndex(), triggerTypeClose, nil)
+	return c.loop.poller.Trigger(triggerTypeClose, c.gfd, nil)
 }
