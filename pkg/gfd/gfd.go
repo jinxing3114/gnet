@@ -12,7 +12,7 @@ const (
 	Size       = FdSize + FdStart
 	ElMax      = 0xFF
 	Conn1Max   = 0xFF
-	Conn2Max   = 0xFFFF
+	Conn2Max   = 0x1400
 )
 
 // GFD

@@ -111,10 +111,8 @@ func (eng *engine) activateEventLoops(numEventLoop int) (err error) {
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
 			el.connectionMap = make(map[int]gfd.GFD)
-			el.connections = make([][]*conn, gfd.Conn1Max)
-			el.connectionCounts = make([]int32, gfd.Conn1Max)
 			el.eventHandler = eng.eventHandler
-			if err = el.poller.AddRead(el.ln.packPollAttachment(el.accept)); err != nil {
+			if err = el.poller.AddRead(el.ln.packPollAttachment(netpoll.PollAttachmentEventLoops)); err != nil {
 				return
 			}
 			eng.lb.register(el)
@@ -145,10 +143,9 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
 			el.connectionMap = make(map[int]gfd.GFD)
-			el.connections = make([][]*conn, gfd.Conn1Max)
-			el.connectionCounts = make([]int32, gfd.Conn1Max)
 			el.eventHandler = eng.eventHandler
 			eng.lb.register(el)
+			el.test(50000)
 		} else {
 			return err
 		}
@@ -164,7 +161,7 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 		el.engine = eng
 		el.poller = p
 		el.eventHandler = eng.eventHandler
-		if err = el.poller.AddRead(eng.ln.packPollAttachment(eng.accept)); err != nil {
+		if err = el.poller.AddRead(eng.ln.packPollAttachment(netpoll.PollAttachmentMainAccept)); err != nil {
 			return err
 		}
 		eng.mainLoop = el
@@ -241,6 +238,7 @@ func (eng *engine) stop(s Engine) {
 func run(eventHandler EventHandler, listener *listener, options *Options, protoAddr string) error {
 	// Figure out the proper number of event-loops/goroutines to run.
 	numEventLoop := 1
+	//log.Println(options.Multicore, runtime.NumCPU())
 	if options.Multicore {
 		numEventLoop = runtime.NumCPU()
 	}
@@ -250,6 +248,7 @@ func run(eventHandler EventHandler, listener *listener, options *Options, protoA
 	if numEventLoop > gfd.ElMax {
 		numEventLoop = gfd.ElMax
 	}
+	//log.Println(numEventLoop)
 
 	eng := new(engine)
 	eng.opts = options

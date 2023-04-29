@@ -37,18 +37,18 @@ import (
 )
 
 type conn struct {
-	ctx            interface{}             // user-defined context
-	peer           unix.Sockaddr           // remote socket address
-	localAddr      net.Addr                // local addr
-	remoteAddr     net.Addr                // remote addr
-	loop           *eventloop              // connected event-loop
-	outboundBuffer *elastic.Buffer         // buffer for data that is eligible to be sent to the peer
-	pollAttachment *netpoll.PollAttachment // connection attachment for poller
-	inboundBuffer  elastic.RingBuffer      // buffer for leftover data from the peer
-	buffer         []byte                  // buffer for the latest bytes
-	gfd            gfd.GFD                 // file descriptor
-	isDatagram     bool                    // UDP protocol
-	opened         bool                    // connection opened event fired
+	ctx            interface{}            // user-defined context
+	peer           unix.Sockaddr          // remote socket address
+	localAddr      net.Addr               // local addr
+	remoteAddr     net.Addr               // remote addr
+	loop           *eventloop             // connected event-loop
+	outboundBuffer elastic.Buffer         // buffer for data that is eligible to be sent to the peer
+	pollAttachment netpoll.PollAttachment // connection attachment for poller
+	inboundBuffer  elastic.RingBuffer     // buffer for leftover data from the peer
+	buffer         []byte                 // buffer for the latest bytes
+	gfd            gfd.GFD                // file descriptor
+	isDatagram     bool                   // UDP protocol
+	opened         bool                   // connection opened event fired
 }
 
 func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr net.Addr) (c *conn) {
@@ -59,9 +59,10 @@ func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr n
 		localAddr:  localAddr,
 		remoteAddr: remoteAddr,
 	}
-	c.outboundBuffer, _ = elastic.New(el.engine.opts.WriteBufferCap)
-	c.pollAttachment = netpoll.GetPollAttachment()
-	c.pollAttachment.FD, c.pollAttachment.Callback = fd, c.handleEvents
+	ela, _ := elastic.New(el.engine.opts.WriteBufferCap)
+	c.outboundBuffer = *ela
+	c.pollAttachment = *netpoll.GetPollAttachment()
+	c.pollAttachment.FD, c.pollAttachment.Type = fd, netpoll.PollAttachmentTCP
 	return
 }
 
@@ -80,8 +81,8 @@ func (c *conn) releaseTCP() {
 	c.remoteAddr = nil
 	c.inboundBuffer.Done()
 	c.outboundBuffer.Release()
-	netpoll.PutPollAttachment(c.pollAttachment)
-	c.pollAttachment = nil
+	netpoll.PutPollAttachment(&c.pollAttachment)
+	//c.pollAttachment = nil
 }
 
 func newUDPConn(fd int, el *eventloop, localAddr net.Addr, sa unix.Sockaddr, connected bool) (c *conn) {
@@ -110,8 +111,8 @@ func (c *conn) releaseUDP() {
 	c.localAddr = nil
 	c.remoteAddr = nil
 	c.buffer = nil
-	netpoll.PutPollAttachment(c.pollAttachment)
-	c.pollAttachment = nil
+	netpoll.PutPollAttachment(&c.pollAttachment)
+	//c.pollAttachment = nil
 }
 
 func (c *conn) open(buf []byte) error {
@@ -142,7 +143,7 @@ func (c *conn) write(data []byte) (n int, err error) {
 		// A temporary error occurs, append the data to outbound buffer, writing it back to the peer in the next round.
 		if err == unix.EAGAIN {
 			_, _ = c.outboundBuffer.Write(data)
-			err = c.loop.poller.ModReadWrite(c.pollAttachment)
+			err = c.loop.poller.ModReadWrite(&c.pollAttachment)
 			return
 		}
 		return -1, c.loop.closeConn(c, os.NewSyscallError("write", err))
@@ -150,7 +151,7 @@ func (c *conn) write(data []byte) (n int, err error) {
 	// Failed to send all data back to the peer, buffer the leftover data for the next round.
 	if sent < n {
 		_, _ = c.outboundBuffer.Write(data[sent:])
-		err = c.loop.poller.ModReadWrite(c.pollAttachment)
+		err = c.loop.poller.ModReadWrite(&c.pollAttachment)
 	}
 	return
 }
@@ -172,7 +173,7 @@ func (c *conn) writev(bs [][]byte) (n int, err error) {
 		// A temporary error occurs, append the data to outbound buffer, writing it back to the peer in the next round.
 		if err == unix.EAGAIN {
 			_, _ = c.outboundBuffer.Writev(bs)
-			err = c.loop.poller.ModReadWrite(c.pollAttachment)
+			err = c.loop.poller.ModReadWrite(&c.pollAttachment)
 			return
 		}
 		return -1, c.loop.closeConn(c, os.NewSyscallError("write", err))
@@ -190,7 +191,7 @@ func (c *conn) writev(bs [][]byte) (n int, err error) {
 			sent -= bn
 		}
 		_, _ = c.outboundBuffer.Writev(bs[pos:])
-		err = c.loop.poller.ModReadWrite(c.pollAttachment)
+		err = c.loop.poller.ModReadWrite(&c.pollAttachment)
 	}
 	return
 }
@@ -375,7 +376,7 @@ func (c *conn) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (c *conn) Flush() error {
-	if c.outboundBuffer == nil || c.outboundBuffer.IsEmpty() {
+	if c.outboundBuffer.IsEmpty() {
 		return nil
 	}
 

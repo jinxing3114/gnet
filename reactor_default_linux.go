@@ -32,7 +32,7 @@ func (el *eventloop) activateMainReactor(lockOSThread bool) {
 
 	defer el.engine.signalShutdown()
 
-	err := el.poller.Polling(el.taskFuncRun, func(fd int, ev uint32) error { return el.engine.accept(fd, ev) })
+	err := el.poller.Polling(el.taskRun, func(fd int, ev uint32) error { return el.engine.accept(fd, ev) })
 	if err == errors.ErrEngineShutdown {
 		el.engine.opts.Logger.Debugf("main reactor is exiting in terms of the demand from user, %v", err)
 	} else if err != nil {
@@ -51,7 +51,7 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 		el.engine.signalShutdown()
 	}()
 
-	err := el.poller.Polling(el.taskFuncRun, func(fd int, ev uint32) error {
+	err := el.poller.Polling(el.taskRun, func(fd int, ev uint32) error {
 		if gfd, ack := el.connectionMap[fd]; ack {
 			// Don't change the ordering of processing EPOLLOUT | EPOLLRDHUP / EPOLLIN unless you're 100%
 			// sure what you're doing!
@@ -96,7 +96,7 @@ func (el *eventloop) run(lockOSThread bool) {
 		el.engine.signalShutdown()
 	}()
 
-	err := el.poller.Polling(el.taskFuncRun, func(fd int, ev uint32) error {
+	err := el.poller.Polling(el.taskRun, func(fd int, ev uint32) error {
 		if gfd, ack := el.connectionMap[fd]; ack {
 			// Don't change the ordering of processing EPOLLOUT | EPOLLRDHUP / EPOLLIN unless you're 100%
 			// sure what you're doing!

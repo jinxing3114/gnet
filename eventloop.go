@@ -39,8 +39,7 @@ import (
 )
 
 const (
-	eventLoopExpansionFactor = 10000
-	triggerTypeAsyncWrite    = iota
+	triggerTypeAsyncWrite = iota
 	triggerTypeAsyncWritev
 	triggerTypeWake
 	triggerTypeClose
@@ -49,20 +48,19 @@ const (
 )
 
 type eventloop struct {
-	ln               *listener       // listener
-	idx              int             // loop index in the engine loops list
-	cache            bytes.Buffer    // temporary buffer for scattered bytes
-	engine           *engine         // engine in loop
-	poller           *netpoll.Poller // epoll or kqueue
-	buffer           []byte          // read packet buffer whose capacity is set by user, default value is 64KB
-	connCount        int32           // number of active connections in event-loop
-	connectionNAI1   int             //connections Next Available Index1
-	connectionNAI2   int             //connections Next Available Index2
-	connectionMap    map[int]gfd.GFD //TCP connection map: fd -> GFD
-	connections      [][]*conn       //TCP connection slice *conn
-	connectionCounts []int32         //
-	udpSockets       map[int]*conn   //
-	eventHandler     EventHandler    // user eventHandler
+	ln             *listener             // listener
+	idx            int                   // loop index in the engine loops list
+	cache          bytes.Buffer          // temporary buffer for scattered bytes
+	engine         *engine               // engine in loop
+	poller         *netpoll.Poller       // epoll or kqueue
+	buffer         []byte                // read packet buffer whose capacity is set by user, default value is 64KB
+	connCounts     [gfd.Conn1Max]int32   // number of active connections in event-loop
+	connectionNAI1 int                   // connections Next Available Index1
+	connectionNAI2 int                   // connections Next Available Index2
+	connectionMap  map[int]gfd.GFD       // TCP connection map: fd -> GFD
+	connections    [gfd.Conn1Max][]*conn // TCP connection slice *conn
+	udpSockets     map[int]*conn         //
+	eventHandler   EventHandler          // user eventHandler
 }
 
 func (el *eventloop) getLogger() logging.Logger {
@@ -70,18 +68,20 @@ func (el *eventloop) getLogger() logging.Logger {
 }
 
 func (el *eventloop) addConn(i1 int, delta int32) {
-	atomic.AddInt32(&el.connCount, delta)
-	atomic.AddInt32(&el.connectionCounts[i1], delta)
+	atomic.AddInt32(&el.connCounts[i1], delta)
 }
 
-func (el *eventloop) loadConn() int32 {
-	return atomic.LoadInt32(&el.connCount)
+func (el *eventloop) loadConn() (ct int32) {
+	for i := 0; i < len(el.connCounts); i++ {
+		ct += atomic.LoadInt32(&el.connCounts[i])
+	}
+	return
 }
 
 func (el *eventloop) closeAllSockets() {
 	// Close loops and all outstanding connections
 	for k, cl := range el.connections {
-		if el.connectionCounts[k] == 0 {
+		if el.connCounts[k] == 0 {
 			continue
 		}
 		for _, c := range cl {
@@ -98,12 +98,40 @@ func (el *eventloop) closeAllSockets() {
 	}
 }
 
+func (el *eventloop) test(c int) {
+	//for i := 0; i < c; i++ {
+	//	c1 := &conn{
+	//		gfd:        gfd.NewGFD(i, el.idx),
+	//		loop:       el,
+	//		localAddr:  el.ln.addr,
+	//		remoteAddr: el.ln.addr,
+	//	}
+	//	//ela, _ := elastic.New(el.engine.opts.WriteBufferCap)
+	//	//c1.outboundBuffer = *ela
+	//	//c1.pollAttachment = *netpoll.GetPollAttachment()
+	//	//c1.pollAttachment.FD, c1.pollAttachment.Type = i, netpoll.PollAttachmentTCP
+	//	//c1 := &conn{gfd: gfd.NewGFD(i, el.idx)}
+	//	//el.storeConn(c1)
+	//	el.connectionMap[c1.gfd.FD()] = c1.gfd
+	//	el.addConn(el.connectionNAI1, 1)
+	//	if el.connections[el.connectionNAI1] == nil {
+	//		el.connections[el.connectionNAI1] = make([]*conn, gfd.Conn2Max)
+	//	}
+	//	el.connections[el.connectionNAI1][el.connectionNAI2] = c1
+	//	el.connectionNAI2++
+	//	if el.connectionNAI2 == gfd.Conn2Max {
+	//		el.connectionNAI1++
+	//		el.connectionNAI2 = 0
+	//	}
+	//}
+}
+
 func (el *eventloop) register(c *conn) error {
-	if c.pollAttachment == nil { // UDP socket
-		c.pollAttachment = netpoll.GetPollAttachment()
+	if c.pollAttachment.FD == 0 { // UDP socket
+		c.pollAttachment = *netpoll.GetPollAttachment()
 		c.pollAttachment.FD = c.gfd.FD()
-		c.pollAttachment.Callback = el.readUDP
-		if err := el.poller.AddRead(c.pollAttachment); err != nil {
+		c.pollAttachment.Type = netpoll.PollAttachmentUDP
+		if err := el.poller.AddRead(&c.pollAttachment); err != nil {
 			_ = unix.Close(c.gfd.FD())
 			c.releaseUDP()
 			return err
@@ -111,7 +139,7 @@ func (el *eventloop) register(c *conn) error {
 		el.udpSockets[c.gfd.FD()] = c
 		return nil
 	}
-	if err := el.poller.AddRead(c.pollAttachment); err != nil {
+	if err := el.poller.AddRead(&c.pollAttachment); err != nil {
 		_ = unix.Close(c.gfd.FD())
 		c.releaseTCP()
 		return err
@@ -135,22 +163,30 @@ func (el *eventloop) storeConn(c *conn) {
 	el.connectionMap[c.gfd.FD()] = c.gfd
 	el.addConn(el.connectionNAI1, 1)
 
+	//检查当前空间是否有剩余可用位置
+	for i2 := el.connectionNAI2; i2 < gfd.Conn2Max; i2++ {
+		if el.connections[el.connectionNAI1][i2] == nil {
+			el.connectionNAI2 = i2
+			return
+		}
+	}
+
+	//检查已申请的其他空间
 	//check if the space have applied for is available
 	for i1 := 0; i1 < gfd.Conn1Max; i1++ {
-		if el.connectionCounts[i1] > 0 && el.connectionCounts[i1] < gfd.Conn2Max {
+		if el.connections[i1] != nil && el.connCounts[i1] < gfd.Conn2Max {
 			for i2 := 0; i2 < gfd.Conn2Max; i2++ {
 				if el.connections[i1][i2] == nil {
 					el.connectionNAI1, el.connectionNAI2 = i1, i2
-					break
+					return
 				}
 			}
-			return
 		}
 	}
 
 	//insufficient space has been applied for, allocate a new space
 	for i1 := 0; i1 < gfd.Conn1Max; i1++ {
-		if el.connectionCounts[i1] == 0 {
+		if el.connections[i1] == nil {
 			el.connectionNAI1, el.connectionNAI2 = i1, 0
 			return
 		}
@@ -168,7 +204,7 @@ func (el *eventloop) open(c *conn) error {
 	}
 
 	if !c.outboundBuffer.IsEmpty() {
-		if err := el.poller.AddWrite(c.pollAttachment); err != nil {
+		if err := el.poller.AddWrite(&c.pollAttachment); err != nil {
 			return err
 		}
 	}
@@ -230,7 +266,7 @@ func (el *eventloop) write(c *conn) error {
 	// All data have been drained, it's no need to monitor the writable events,
 	// remove the writable event from poller to help the future event-loops.
 	if c.outboundBuffer.IsEmpty() {
-		_ = el.poller.ModRead(c.pollAttachment)
+		_ = el.poller.ModRead(&c.pollAttachment)
 	}
 
 	return nil
@@ -285,7 +321,7 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 
 	delete(el.connectionMap, c.gfd.FD())
 	el.addConn(c.gfd.ConnIndex1(), -1)
-	if el.connectionCounts[c.gfd.ConnIndex1()] == 0 {
+	if el.connCounts[c.gfd.ConnIndex1()] == 0 {
 		el.connections[c.gfd.ConnIndex1()] = nil
 	} else {
 		el.connections[c.gfd.ConnIndex1()][c.gfd.ConnIndex2()] = nil
@@ -345,17 +381,28 @@ func (el *eventloop) ticker(ctx context.Context) {
 	}
 }
 
-func (el *eventloop) taskFuncRun(task *queue.Task) (err error) {
+func (el *eventloop) pollCallback(poolType byte, fd int, e netpoll.IOEvent) (err error) {
+	switch poolType {
+	case netpoll.PollAttachmentMainAccept:
+		return el.engine.accept(fd, e)
+	case netpoll.PollAttachmentEventLoops:
+		return el.accept(fd, e)
+	case netpoll.PollAttachmentTCP:
+		return el.handleEvents(fd, e)
+	case netpoll.PollAttachmentUDP:
+		return el.readUDP(fd, e)
+	default:
+		return
+	}
+}
+
+func (el *eventloop) taskRun(task *queue.Task) (err error) {
 	//非conn执行任务
-	if task.GFD.FD() == 0 {
-		switch task.TaskType {
-		case triggerTypeShutdown:
-			return gerrors.ErrEngineShutdown
-		case triggerRegister:
-			return el.register(task.Arg.(*conn))
-		default:
-			return
-		}
+	switch task.TaskType {
+	case triggerTypeShutdown:
+		return gerrors.ErrEngineShutdown
+	case triggerRegister:
+		return el.register(task.Arg.(*conn))
 	}
 
 	//需conn执行任务

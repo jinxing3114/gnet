@@ -18,7 +18,6 @@
 package gnet
 
 import (
-	"github.com/panjf2000/gnet/v2/pkg/gfd"
 	"os"
 	"time"
 
@@ -52,7 +51,7 @@ func (eng *engine) accept(fd int, _ netpoll.IOEvent) error {
 	el := eng.lb.next(remoteAddr)
 	c := newTCPConn(nfd, el, sa, el.ln.addr, remoteAddr)
 
-	err = el.poller.UrgentTrigger(triggerRegister, gfd.GFD{}, c)
+	err = el.poller.UrgentTrigger(triggerRegister, c.gfd, c)
 	if err != nil {
 		eng.opts.Logger.Errorf("UrgentTrigger() failed due to error: %v", err)
 		_ = unix.Close(nfd)
@@ -85,7 +84,7 @@ func (el *eventloop) accept(fd int, ev netpoll.IOEvent) error {
 	}
 
 	c := newTCPConn(nfd, el, sa, el.ln.addr, remoteAddr)
-	if err = el.poller.AddRead(c.pollAttachment); err != nil {
+	if err = el.poller.AddRead(&c.pollAttachment); err != nil {
 		return err
 	}
 	el.storeConn(c)

@@ -36,3 +36,21 @@ func (c *conn) handleEvents(_ int, filter int16) (err error) {
 	}
 	return
 }
+
+func (el *eventloop) handleEvents(fd int, filter int16) (err error) {
+	if gfd, ok := el.connectionMap[fd]; ok {
+		c := el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()]
+		switch filter {
+		case netpoll.EVFilterSock:
+			err = el.closeConn(c, unix.ECONNRESET)
+		case netpoll.EVFilterWrite:
+			if !c.outboundBuffer.IsEmpty() {
+				err = el.write(c)
+			}
+		case netpoll.EVFilterRead:
+			err = c.loop.read(c)
+		}
+	}
+
+	return
+}
