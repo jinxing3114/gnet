@@ -38,8 +38,7 @@ func (c *conn) handleEvents(_ int, filter int16) (err error) {
 }
 
 func (el *eventloop) handleEvents(fd int, filter int16) (err error) {
-	if gfd, ok := el.connectionMap[fd]; ok {
-		c := el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()]
+	if c, ok := el.connections[fd]; ok {
 		switch filter {
 		case netpoll.EVFilterSock:
 			err = el.closeConn(c, unix.ECONNRESET)
@@ -48,7 +47,7 @@ func (el *eventloop) handleEvents(fd int, filter int16) (err error) {
 				err = el.write(c)
 			}
 		case netpoll.EVFilterRead:
-			err = c.loop.read(c)
+			err = el.read(c)
 		}
 	}
 

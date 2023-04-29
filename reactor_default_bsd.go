@@ -55,16 +55,16 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 	}()
 
 	err := el.poller.Polling(el.taskRun, func(fd int, filter int16) (err error) {
-		if gfd, ack := el.connectionMap[fd]; ack {
+		if c, ack := el.connections[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
+				err = el.closeConn(c, unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				if c.outboundBuffer.IsEmpty() {
+					err = el.write(c)
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				err = el.read(c)
 			}
 		}
 		return
@@ -89,16 +89,16 @@ func (el *eventloop) run(lockOSThread bool) {
 	}()
 
 	err := el.poller.Polling(el.taskRun, func(fd int, filter int16) (err error) {
-		if gfd, ack := el.connectionMap[fd]; ack {
+		if c, ack := el.connections[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
+				err = el.closeConn(c, unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				if !c.outboundBuffer.IsEmpty() {
+					err = el.write(c)
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				err = el.read(c)
 			}
 			return
 		}

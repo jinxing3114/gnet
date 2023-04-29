@@ -87,6 +87,7 @@ func (el *eventloop) accept(fd int, ev netpoll.IOEvent) error {
 	if err = el.poller.AddRead(&c.pollAttachment); err != nil {
 		return err
 	}
-	el.storeConn(c)
+	el.connections[c.gfd.Fd()] = c
+
 	return el.open(c)
 }

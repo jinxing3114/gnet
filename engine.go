@@ -21,6 +21,7 @@ package gnet
 import (
 	"context"
 	"github.com/panjf2000/gnet/v2/pkg/gfd"
+	"log"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -110,7 +111,7 @@ func (eng *engine) activateEventLoops(numEventLoop int) (err error) {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make(map[int]*conn)
 			el.eventHandler = eng.eventHandler
 			if err = el.poller.AddRead(el.ln.packPollAttachment(netpoll.PollAttachmentEventLoops)); err != nil {
 				return
@@ -142,10 +143,10 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make(map[int]*conn)
 			el.eventHandler = eng.eventHandler
 			eng.lb.register(el)
-			el.test(50000)
+			el.test(200000)
 		} else {
 			return err
 		}
@@ -248,7 +249,7 @@ func run(eventHandler EventHandler, listener *listener, options *Options, protoA
 	if numEventLoop > gfd.ElMax {
 		numEventLoop = gfd.ElMax
 	}
-	//log.Println(numEventLoop)
+	log.Println(numEventLoop)
 
 	eng := new(engine)
 	eng.opts = options

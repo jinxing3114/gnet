@@ -138,7 +138,7 @@ func (p *Poller) Polling(taskRun func(task *queue.Task) error, poolCallback func
 			ev := &el.events[i]
 			pollAttachment := *(**PollAttachment)(unsafe.Pointer(&ev.data))
 			if pollAttachment.FD != p.epa.FD {
-				switch err = poolCallback(pollAttachment.Datagram, pollAttachment.FD, ev.events); err {
+				switch err = poolCallback(pollAttachment.Type, pollAttachment.FD, ev.events); err {
 				case nil:
 				case errors.ErrAcceptSocket, errors.ErrEngineShutdown:
 					return err
