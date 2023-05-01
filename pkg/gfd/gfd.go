@@ -6,22 +6,22 @@ import (
 )
 
 const (
-	Conn2Start = 2
-	FdStart    = 4
-	FdSize     = unsafe.Sizeof(int(0))
-	Size       = FdSize + FdStart
-	ElMax      = 0xFF
-	Conn1Max   = 0xFF
-	Conn2Max   = 0x1400
+	ConnIndex2Start = 2
+	FdStart         = 4
+	FdSize          = unsafe.Sizeof(int(0))
+	Size            = FdSize + FdStart
+	ElIndexMax      = 0xFF
+	ConnIndex1Max   = 0xFF
+	ConnIndex2Max   = 0x1400
 )
 
 // GFD
 // structure introduction
-// |eventloop index|conn first index|conn second index|      fd     |
-// |     1bit      |     1bit       |      2bit       |int type size|
+// |eventloop index|conn level one index|conn level two index|      fd     |
+// |     1bit      |       1bit         |        2bit        |int type size|
 type GFD [Size]byte
 
-func (gfd GFD) FD() int {
+func (gfd GFD) Fd() int {
 	if FdSize == 4 {
 		return int(binary.BigEndian.Uint32(gfd[FdStart:]))
 	} else {
@@ -38,12 +38,12 @@ func (gfd *GFD) ConnIndex1() int {
 }
 
 func (gfd *GFD) ConnIndex2() int {
-	return int(binary.BigEndian.Uint16(gfd[Conn2Start:FdStart]))
+	return int(binary.BigEndian.Uint16(gfd[ConnIndex2Start:FdStart]))
 }
 
 func (gfd *GFD) UpdateConnIndex(connIndex1, connIndex2 int) {
 	gfd[1] = byte(connIndex1)
-	binary.BigEndian.PutUint16(gfd[Conn2Start:FdStart], uint16(connIndex2))
+	binary.BigEndian.PutUint16(gfd[ConnIndex2Start:FdStart], uint16(connIndex2))
 }
 
 func NewGFD(fd, elIndex int) (gfd GFD) {
@@ -57,9 +57,9 @@ func NewGFD(fd, elIndex int) (gfd GFD) {
 }
 
 func CheckLegal(gfd GFD) bool {
-	if gfd.FD() <= 0 || gfd.ElIndex() < 0 || gfd.ElIndex() >= ElMax ||
-		gfd.ConnIndex1() < 0 || gfd.ConnIndex1() >= Conn1Max ||
-		gfd.ConnIndex2() < 0 || gfd.ConnIndex2() >= Conn2Max {
+	if gfd.Fd() <= 0 || gfd.ElIndex() < 0 || gfd.ElIndex() >= ElIndexMax ||
+		gfd.ConnIndex1() < 0 || gfd.ConnIndex1() >= ConnIndex1Max ||
+		gfd.ConnIndex2() < 0 || gfd.ConnIndex2() >= ConnIndex2Max {
 		return false
 	}
 	return true

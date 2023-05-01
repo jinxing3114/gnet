@@ -17,33 +17,17 @@
 
 package netpoll
 
-import "sync"
+type PollCallbackType uint8
 
 const (
-	PollAttachmentMainAccept byte = 1
-	PollAttachmentEventLoops byte = 2
-	PollAttachmentUDP        byte = 3
-	PollAttachmentTCP        byte = 4
+	PollAttachmentMainAccept PollCallbackType = iota + 1
+	PollAttachmentEventLoops
+	PollAttachmentDatagram
+	PollAttachmentStream
 )
-
-var pollAttachmentPool = sync.Pool{New: func() interface{} { return new(PollAttachment) }}
-
-// GetPollAttachment attempts to get a cached PollAttachment from pool.
-func GetPollAttachment() *PollAttachment {
-	return pollAttachmentPool.Get().(*PollAttachment)
-}
-
-// PutPollAttachment put an unused PollAttachment back to pool.
-func PutPollAttachment(pa *PollAttachment) {
-	if pa == nil {
-		return
-	}
-	pa.FD, pa.Type = 0, 0
-	pollAttachmentPool.Put(pa)
-}
 
 // PollAttachment is the user data which is about to be stored in "void *ptr" of epoll_data or "void *udata" of kevent.
 type PollAttachment struct {
 	FD   int
-	Type byte
+	Type PollCallbackType
 }

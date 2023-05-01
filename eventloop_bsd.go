@@ -23,23 +23,9 @@ import (
 	"github.com/panjf2000/gnet/v2/internal/netpoll"
 )
 
-func (c *conn) handleEvents(_ int, filter int16) (err error) {
-	switch filter {
-	case netpoll.EVFilterSock:
-		err = c.loop.closeConn(c, unix.ECONNRESET)
-	case netpoll.EVFilterWrite:
-		if !c.outboundBuffer.IsEmpty() {
-			err = c.loop.write(c)
-		}
-	case netpoll.EVFilterRead:
-		err = c.loop.read(c)
-	}
-	return
-}
-
 func (el *eventloop) handleEvents(fd int, filter int16) (err error) {
-	if gfd, ok := el.connectionMap[fd]; ok {
-		c := el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()]
+	if gfd, ok := el.connections[fd]; ok {
+		c := el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()]
 		switch filter {
 		case netpoll.EVFilterSock:
 			err = el.closeConn(c, unix.ECONNRESET)
@@ -48,7 +34,7 @@ func (el *eventloop) handleEvents(fd int, filter int16) (err error) {
 				err = el.write(c)
 			}
 		case netpoll.EVFilterRead:
-			err = c.loop.read(c)
+			err = el.read(c)
 		}
 	}
 

@@ -108,7 +108,7 @@ func (p *Poller) Trigger(taskType int, gfd gfd.GFD, arg interface{}) (err error)
 }
 
 // Polling blocks the current goroutine, waiting for network-events.
-func (p *Poller) Polling(taskRun func(task *queue.Task) error, pollCallback func(pat, fd int, e netpoll.IOEvent) error) error {
+func (p *Poller) Polling(taskRun func(task *queue.Task) error, pollCallback func(pct PollCallbackType, fd int, e IOEvent) error) error {
 	el := newEventList(InitPollEventsCap)
 
 	var (
@@ -137,7 +137,7 @@ func (p *Poller) Polling(taskRun func(task *queue.Task) error, pollCallback func
 					evFilter = EVFilterSock
 				}
 				pollAttachment := (*PollAttachment)(unsafe.Pointer(ev.Udata))
-				switch err = pollCallback(pollAttachment.Datagram, int(ev.Ident), evFilter); err {
+				switch err = pollCallback(pollAttachment.Type, int(ev.Ident), evFilter); err {
 				case nil:
 				case errors.ErrAcceptSocket, errors.ErrEngineShutdown:
 					return err

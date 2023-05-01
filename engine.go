@@ -110,7 +110,7 @@ func (eng *engine) activateEventLoops(numEventLoop int) (err error) {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make(map[int]gfd.GFD)
 			el.eventHandler = eng.eventHandler
 			if err = el.poller.AddRead(el.ln.packPollAttachment(netpoll.PollAttachmentEventLoops)); err != nil {
 				return
@@ -142,10 +142,10 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 			el.engine = eng
 			el.poller = p
 			el.buffer = make([]byte, eng.opts.ReadBufferCap)
-			el.connectionMap = make(map[int]gfd.GFD)
+			el.connections = make(map[int]gfd.GFD)
 			el.eventHandler = eng.eventHandler
 			eng.lb.register(el)
-			el.test(50000)
+			el.test(200000)
 		} else {
 			return err
 		}
@@ -238,17 +238,15 @@ func (eng *engine) stop(s Engine) {
 func run(eventHandler EventHandler, listener *listener, options *Options, protoAddr string) error {
 	// Figure out the proper number of event-loops/goroutines to run.
 	numEventLoop := 1
-	//log.Println(options.Multicore, runtime.NumCPU())
 	if options.Multicore {
 		numEventLoop = runtime.NumCPU()
 	}
 	if options.NumEventLoop > 0 {
 		numEventLoop = options.NumEventLoop
 	}
-	if numEventLoop > gfd.ElMax {
-		numEventLoop = gfd.ElMax
+	if numEventLoop > gfd.ElIndexMax {
+		numEventLoop = gfd.ElIndexMax
 	}
-	//log.Println(numEventLoop)
 
 	eng := new(engine)
 	eng.opts = options

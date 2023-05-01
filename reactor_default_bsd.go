@@ -55,16 +55,16 @@ func (el *eventloop) activateSubReactor(lockOSThread bool) {
 	}()
 
 	err := el.poller.Polling(el.taskRun, func(fd int, filter int16) (err error) {
-		if gfd, ack := el.connectionMap[fd]; ack {
+		if gfd, ack := el.connections[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
+				err = el.closeConn(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				if !el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()])
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				err = el.read(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()])
 			}
 		}
 		return
@@ -89,16 +89,16 @@ func (el *eventloop) run(lockOSThread bool) {
 	}()
 
 	err := el.poller.Polling(el.taskRun, func(fd int, filter int16) (err error) {
-		if gfd, ack := el.connectionMap[fd]; ack {
+		if gfd, ack := el.connections[fd]; ack {
 			switch filter {
 			case netpoll.EVFilterSock:
-				err = el.closeConn(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
+				err = el.closeConn(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()], unix.ECONNRESET)
 			case netpoll.EVFilterWrite:
-				if !el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
-					err = el.write(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				if !el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()].outboundBuffer.IsEmpty() {
+					err = el.write(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()])
 				}
 			case netpoll.EVFilterRead:
-				err = el.read(el.connections[gfd.ConnIndex1()][gfd.ConnIndex2()])
+				err = el.read(el.connSlice[gfd.ConnIndex1()][gfd.ConnIndex2()])
 			}
 			return
 		}
