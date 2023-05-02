@@ -2,12 +2,14 @@ package gfd
 
 import (
 	"encoding/binary"
+	"time"
 	"unsafe"
 )
 
 const (
 	ConnIndex2Start = 2
-	FdStart         = 4
+	TimeStampStart  = 4
+	FdStart         = 8
 	FdSize          = unsafe.Sizeof(int(0))
 	Size            = FdSize + FdStart
 	ElIndexMax      = 0xFF
@@ -17,8 +19,8 @@ const (
 
 // GFD
 // structure introduction
-// |eventloop index|conn level one index|conn level two index|      fd     |
-// |     1bit      |       1bit         |        2bit        |int type size|
+// |eventloop index|conn level one index|conn level two index| timestamp |      fd     |
+// |     1bit      |       1bit         |        2bit        |    4bit   |int type size|
 type GFD [Size]byte
 
 func (gfd GFD) Fd() int {
@@ -29,25 +31,30 @@ func (gfd GFD) Fd() int {
 	}
 }
 
-func (gfd *GFD) ElIndex() int {
+func (gfd GFD) ElIndex() int {
 	return int(gfd[0])
 }
 
-func (gfd *GFD) ConnIndex1() int {
+func (gfd GFD) ConnIndex1() int {
 	return int(gfd[1])
 }
 
-func (gfd *GFD) ConnIndex2() int {
-	return int(binary.BigEndian.Uint16(gfd[ConnIndex2Start:FdStart]))
+func (gfd GFD) ConnIndex2() int {
+	return int(binary.BigEndian.Uint16(gfd[ConnIndex2Start:TimeStampStart]))
+}
+
+func (gfd GFD) Timestamp() uint32 {
+	return binary.BigEndian.Uint32(gfd[TimeStampStart:FdStart])
 }
 
 func (gfd *GFD) UpdateConnIndex(connIndex1, connIndex2 int) {
 	gfd[1] = byte(connIndex1)
-	binary.BigEndian.PutUint16(gfd[ConnIndex2Start:FdStart], uint16(connIndex2))
+	binary.BigEndian.PutUint16(gfd[ConnIndex2Start:TimeStampStart], uint16(connIndex2))
 }
 
 func NewGFD(fd, elIndex int) (gfd GFD) {
 	gfd[0] = byte(elIndex)
+	binary.BigEndian.PutUint32(gfd[TimeStampStart:FdStart], uint32(time.Now().UnixMilli()))
 	if FdSize == 4 {
 		binary.BigEndian.PutUint32(gfd[FdStart:], uint32(fd))
 	} else {
@@ -59,7 +66,8 @@ func NewGFD(fd, elIndex int) (gfd GFD) {
 func CheckLegal(gfd GFD) bool {
 	if gfd.Fd() <= 0 || gfd.ElIndex() < 0 || gfd.ElIndex() >= ElIndexMax ||
 		gfd.ConnIndex1() < 0 || gfd.ConnIndex1() >= ConnIndex1Max ||
-		gfd.ConnIndex2() < 0 || gfd.ConnIndex2() >= ConnIndex2Max {
+		gfd.ConnIndex2() < 0 || gfd.ConnIndex2() >= ConnIndex2Max ||
+		gfd.Timestamp() == 0 {
 		return false
 	}
 	return true

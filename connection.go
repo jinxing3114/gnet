@@ -60,8 +60,7 @@ func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, localAddr, remoteAddr n
 		remoteAddr:     remoteAddr,
 		pollAttachment: netpoll.PollAttachment{FD: fd, Type: netpoll.PollAttachmentStream},
 	}
-	ela, _ := elastic.New(el.engine.opts.WriteBufferCap)
-	c.outboundBuffer = *ela
+	c.outboundBuffer.Reset(el.engine.opts.WriteBufferCap)
 	return
 }
 

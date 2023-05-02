@@ -98,35 +98,6 @@ func (el *eventloop) closeAllSockets() {
 	}
 }
 
-func (el *eventloop) test(c int) {
-	for i := 0; i < c; i++ {
-		c1 := newTCPConn(i, el, nil, el.ln.addr, el.ln.addr)
-		//c1 := &conn{
-		//	gfd:        gfd.NewGFD(i, el.idx),
-		//	loop:       el,
-		//	localAddr:  el.ln.addr,
-		//	remoteAddr: el.ln.addr,
-		//}
-		//ela, _ := elastic.New(el.engine.opts.WriteBufferCap)
-		//c1.outboundBuffer = *ela
-		//c1.pollAttachment = *netpoll.GetPollAttachment()
-		//c1.pollAttachment.FD, c1.pollAttachment.Type = i, netpoll.PollAttachmentTCP
-		//c1 := &conn{gfd: gfd.NewGFD(i, el.idx)}
-		//el.storeConn(c1)
-		el.connections[c1.gfd.Fd()] = c1.gfd
-		el.addConn(el.connNAI1, 1)
-		if el.connSlice[el.connNAI1] == nil {
-			el.connSlice[el.connNAI1] = make([]*conn, gfd.ConnIndex2Max)
-		}
-		el.connSlice[el.connNAI1][el.connNAI2] = c1
-		el.connNAI2++
-		if el.connNAI2 == gfd.ConnIndex2Max {
-			el.connNAI1++
-			el.connNAI2 = 0
-		}
-	}
-}
-
 func (el *eventloop) register(c *conn) error {
 	if c.isDatagram { // UDP socket
 		if err := el.poller.AddRead(&c.pollAttachment); err != nil {
@@ -408,7 +379,7 @@ func (el *eventloop) taskRun(task *queue.Task) (err error) {
 		return
 	}
 	c := el.connSlice[task.GFD.ConnIndex1()][task.GFD.ConnIndex2()]
-	if c == nil || c.gfd.Fd() != task.GFD.Fd() {
+	if c == nil || c.gfd != task.GFD {
 		return
 	}
 	switch task.TaskType {

@@ -145,7 +145,6 @@ func (eng *engine) activateReactors(numEventLoop int) error {
 			el.connections = make(map[int]gfd.GFD)
 			el.eventHandler = eng.eventHandler
 			eng.lb.register(el)
-			el.test(200000)
 		} else {
 			return err
 		}
