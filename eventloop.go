@@ -59,7 +59,6 @@ type eventloop struct {
 	connNAI2     int                        // connections Next Available Index2
 	connSlice    [gfd.ConnIndex1Max][]*conn // TCP connection slice *conn
 	connections  map[int]gfd.GFD            // TCP connection map: fd -> GFD
-	udpSockets   map[int]*conn              // client-side UDP socket map: fd -> conn
 	eventHandler EventHandler               // user eventHandler
 }
 
@@ -90,12 +89,6 @@ func (el *eventloop) closeAllSockets() {
 			}
 		}
 	}
-
-	for _, c := range el.udpSockets {
-		if c != nil {
-			_ = el.closeConn(c, nil)
-		}
-	}
 }
 
 func (el *eventloop) register(c *conn) error {
@@ -105,7 +98,7 @@ func (el *eventloop) register(c *conn) error {
 			c.releaseUDP()
 			return err
 		}
-		el.udpSockets[c.gfd.Fd()] = c
+		el.storeConn(c)
 		return nil
 	}
 	if err := el.poller.AddRead(&c.pollAttachment); err != nil {
@@ -246,7 +239,18 @@ func (el *eventloop) closeConn(c *conn, err error) (rerr error) {
 		rerr = el.poller.Delete(c.gfd.Fd())
 		if c.gfd.Fd() != el.ln.fd {
 			rerr = unix.Close(c.gfd.Fd())
-			delete(el.udpSockets, c.gfd.Fd())
+
+			delete(el.connections, c.gfd.Fd())
+			el.addConn(c.gfd.ConnIndex1(), -1)
+			if el.connCounts[c.gfd.ConnIndex1()] == 0 {
+				el.connSlice[c.gfd.ConnIndex1()] = nil
+			} else {
+				el.connSlice[c.gfd.ConnIndex1()][c.gfd.ConnIndex2()] = nil
+			}
+
+			if el.connNAI1 > c.gfd.ConnIndex1() || el.connNAI2 > c.gfd.ConnIndex2() {
+				el.connNAI1, el.connNAI2 = c.gfd.ConnIndex1(), c.gfd.ConnIndex2()
+			}
 		}
 		if el.eventHandler.OnClose(c, err) == Shutdown {
 			return gerrors.ErrEngineShutdown
@@ -434,7 +438,9 @@ func (el *eventloop) readUDP(fd int, _ netpoll.IOEvent) error {
 	if fd == el.ln.fd {
 		c = newUDPConn(fd, el, el.ln.addr, sa, false)
 	} else {
-		c = el.udpSockets[fd]
+		if gFd, ok := el.connections[fd]; ok {
+			c = el.connSlice[gFd.ConnIndex1()][gFd.ConnIndex2()]
+		}
 	}
 	c.buffer = el.buffer[:n]
 	action := el.eventHandler.OnTraffic(c)
